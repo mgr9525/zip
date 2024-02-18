@@ -527,6 +527,13 @@ impl<R: Read + io::Seek> ZipArchive<R> {
     ) -> ZipResult<Result<ZipFile<'a>, InvalidPassword>> {
         self.by_name_with_optional_password(name, Some(password))
     }
+    pub fn by_name_decrypts<'a>(
+        &'a mut self,
+        name: &str,
+        password: &[u8],
+    ) -> ZipResult<Result<ZipFile<'a>, InvalidPassword>> {
+        self.by_name_with_optional_passwords(name, Some(password))
+    }
 
     /// Search for a file entry by name
     pub fn by_name<'a>(&'a mut self, name: &str) -> ZipResult<ZipFile<'a>> {
@@ -545,6 +552,19 @@ impl<R: Read + io::Seek> ZipArchive<R> {
             }
         };
         self.by_index_with_optional_password(index, password)
+    }
+    fn by_name_with_optional_passwords<'a>(
+        &'a mut self,
+        name: &str,
+        password: Option<&[u8]>,
+    ) -> ZipResult<Result<ZipFile<'a>, InvalidPassword>> {
+        let index = match self.shared.names_map.get(name) {
+            Some(index) => *index,
+            None => {
+                return Err(ZipError::FileNotFound);
+            }
+        };
+        self.by_index_with_optional_passwords(index, password)
     }
 
     /// Get a contained file by index, decrypt with given password
@@ -566,6 +586,14 @@ impl<R: Read + io::Seek> ZipArchive<R> {
         password: &[u8],
     ) -> ZipResult<Result<ZipFile<'a>, InvalidPassword>> {
         self.by_index_with_optional_password(file_number, Some(password))
+    }
+
+    pub fn by_index_decrypts<'a>(
+        &'a mut self,
+        file_number: usize,
+        password: &[u8],
+    ) -> ZipResult<Result<ZipFile<'a>, InvalidPassword>> {
+        self.by_index_with_optional_passwords(file_number, Some(password))
     }
 
     /// Get a contained file by index
@@ -605,6 +633,46 @@ impl<R: Read + io::Seek> ZipArchive<R> {
         match (password, data.encrypted) {
             (None, true) => return Err(ZipError::UnsupportedArchive(ZipError::PASSWORD_REQUIRED)),
             (Some(_), false) => password = None, //Password supplied, but none needed! Discard.
+            _ => {}
+        }
+        let limit_reader = find_content(data, &mut self.reader)?;
+
+        match make_crypto_reader(
+            data.compression_method,
+            data.crc32,
+            data.last_modified_time,
+            data.using_data_descriptor,
+            limit_reader,
+            password,
+            data.aes_mode,
+            #[cfg(feature = "aes-crypto")]
+            data.compressed_size,
+        ) {
+            Ok(Ok(crypto_reader)) => Ok(Ok(ZipFile {
+                crypto_reader: Some(crypto_reader),
+                reader: ZipFileReader::NoReader,
+                data: Cow::Borrowed(data),
+            })),
+            Err(e) => Err(e),
+            Ok(Err(e)) => Ok(Err(e)),
+        }
+    }
+
+    fn by_index_with_optional_passwords<'a>(
+        &'a mut self,
+        file_number: usize,
+        mut password: Option<&[u8]>,
+    ) -> ZipResult<Result<ZipFile<'a>, InvalidPassword>> {
+        let data = self
+            .shared
+            .files
+            .get(file_number)
+            .ok_or(ZipError::FileNotFound)?;
+
+        match (password, data.encrypted) {
+            (None, true) => return Err(ZipError::UnsupportedArchive(ZipError::PASSWORD_REQUIRED)),
+            // (Some(_), false) => password = None, //Password supplied, but none needed! Discard.
+            (Some(_), false) => return Err(ZipError::NotUsePaasword), //Password supplied, but none needed! Err.
             _ => {}
         }
         let limit_reader = find_content(data, &mut self.reader)?;

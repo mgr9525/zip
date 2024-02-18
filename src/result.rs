@@ -31,6 +31,8 @@ pub enum ZipError {
     /// This archive is not supported
     UnsupportedArchive(&'static str),
 
+    NotUsePaasword,
+
     /// The requested file could not be found in the archive
     FileNotFound,
 }
@@ -47,6 +49,7 @@ impl fmt::Display for ZipError {
             ZipError::Io(err) => write!(fmt, "{err}"),
             ZipError::InvalidArchive(err) => write!(fmt, "invalid Zip archive: {err}"),
             ZipError::UnsupportedArchive(err) => write!(fmt, "unsupported Zip archive: {err}"),
+            ZipError::NotUsePaasword => write!(fmt, "not use password"),
             ZipError::FileNotFound => write!(fmt, "specified file not found in archive"),
         }
     }
